@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY pom.xml .
 COPY src ./src
+COPY uploads ./uploads
 
 RUN mvn -B -DskipTests package
 
@@ -12,6 +13,7 @@ FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 
 COPY --from=build /app/target/social-app-backend-0.0.1-SNAPSHOT.jar app.jar
+COPY --from=build /app/uploads ./uploads
 
 EXPOSE 8080
 ENV JAVA_OPTS=""

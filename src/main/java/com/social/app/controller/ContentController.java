@@ -503,6 +503,9 @@ private static String findProfileImageIdIgnoreCase(String username) {
         }
 
         String targetUrl = IMAGE_URLS.getOrDefault(id, DEFAULT_IMAGE_URL);
+        if (targetUrl.equals("/api/images/" + id)) {
+            targetUrl = DEFAULT_IMAGE_URL;
+        }
         HttpHeaders headers = new HttpHeaders();
         headers.setLocation(URI.create(targetUrl));
         return ResponseEntity.status(HttpStatus.FOUND).headers(headers).build();
