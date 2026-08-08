@@ -22,6 +22,7 @@ import org.springframework.web.filter.CorsFilter;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 
@@ -126,6 +127,26 @@ public class SecurityConfig {
         return Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
                 .filter(origin -> !origin.isEmpty())
+                .map(this::normalizeOrigin)
+                .filter(origin -> !origin.isBlank())
                 .toList();
+    }
+
+    private String normalizeOrigin(String origin) {
+        if ("*".equals(origin)) {
+            return "*";
+        }
+        try {
+            URI uri = new URI(origin);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (scheme == null || host == null) {
+                return "";
+            }
+            int port = uri.getPort();
+            return port == -1 ? scheme + "://" + host : scheme + "://" + host + ":" + port;
+        } catch (Exception e) {
+            return "";
+        }
     }
 }

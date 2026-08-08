@@ -10,6 +10,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 
@@ -23,6 +24,8 @@ public class CorsResponseFilter extends OncePerRequestFilter {
         } else {
             this.allowedOrigins = Arrays.stream(allowedOrigins.split(","))
                     .map(String::trim)
+                    .filter(StringUtils::hasText)
+                    .map(this::normalizeOrigin)
                     .filter(StringUtils::hasText)
                     .toList();
         }
@@ -54,5 +57,23 @@ public class CorsResponseFilter extends OncePerRequestFilter {
             return true;
         }
         return allowedOrigins.stream().anyMatch(origin::equalsIgnoreCase);
+    }
+
+    private String normalizeOrigin(String origin) {
+        if ("*".equals(origin)) {
+            return "*";
+        }
+        try {
+            URI uri = new URI(origin);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (scheme == null || host == null) {
+                return "";
+            }
+            int port = uri.getPort();
+            return port == -1 ? scheme + "://" + host : scheme + "://" + host + ":" + port;
+        } catch (Exception e) {
+            return "";
+        }
     }
 }
