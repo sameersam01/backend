@@ -45,10 +45,10 @@ public class ContentController {
     private static final Map<String, ImageRecord> IMAGE_RECORDS = new ConcurrentHashMap<>();
     private static final Map<String, String> PROFILE_PICTURES = new ConcurrentHashMap<>();
     private static final Map<String, List<String>> USER_IMAGES = new ConcurrentHashMap<>();
-    private static final Path UPLOAD_DIR = Paths.get("uploads");
-    private static final Path METADATA_FILE = UPLOAD_DIR.resolve("metadata.txt");
-    private static final Path PROFILE_METADATA_FILE = UPLOAD_DIR.resolve("profile-mapping.txt");
-    private static final Path USER_IMAGES_FILE = UPLOAD_DIR.resolve("user-images.txt");
+    private static Path UPLOAD_DIR;
+    private static Path METADATA_FILE;
+    private static Path PROFILE_METADATA_FILE;
+    private static Path USER_IMAGES_FILE;
     private static final String METADATA_DELIMITER = "|";
     private static final List<Map<String, Object>> FEED = new ArrayList<>();
 
@@ -91,12 +91,37 @@ public class ContentController {
 
     static {
         try {
+            UPLOAD_DIR = findUploadDir();
+            METADATA_FILE = UPLOAD_DIR.resolve("metadata.txt");
+            PROFILE_METADATA_FILE = UPLOAD_DIR.resolve("profile-mapping.txt");
+            USER_IMAGES_FILE = UPLOAD_DIR.resolve("user-images.txt");
+            System.out.println("Using uploads directory: " + UPLOAD_DIR.toAbsolutePath());
             initUploadStore();
             initProfileStore();
             initUserImagesStore();
         } catch (IOException e) {
             throw new IllegalStateException("Unable to initialize upload storage", e);
         }
+    }
+
+    private static Path findUploadDir() throws IOException {
+        Path cwd = Paths.get(System.getProperty("user.dir"));
+        // Check current and up to 3 parent levels for an 'uploads' folder
+        Path cursor = cwd;
+        for (int i = 0; i < 4; i++) {
+            Path candidate = cursor.resolve("uploads");
+            if (Files.exists(candidate) && Files.isDirectory(candidate)) {
+                return candidate.toAbsolutePath().normalize();
+            }
+            cursor = cursor.getParent();
+            if (cursor == null) break;
+        }
+        // If not found, create uploads directory in current working dir
+        Path created = cwd.resolve("uploads");
+        if (!Files.exists(created)) {
+            Files.createDirectories(created);
+        }
+        return created.toAbsolutePath().normalize();
     }
 
     private static UserRepository userRepository;
