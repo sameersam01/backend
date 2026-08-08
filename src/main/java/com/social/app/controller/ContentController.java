@@ -287,15 +287,16 @@ public class ContentController {
     }
 
  @GetMapping("/stories")
-public List<Map<String, Object>> stories() {
+public List<Map<String, Object>> stories(HttpServletRequest request) {
 
+    String baseUrl = request.getRequestURL().toString().replace(request.getRequestURI(), request.getContextPath());
     List<Map<String, Object>> stories = new ArrayList<>();
 
     if (PROFILE_PICTURES.isEmpty()) {
         Map<String, Object> defaultStory = new HashMap<>();
         defaultStory.put("id", "your-story");
         defaultStory.put("name", "Your Story");
-        defaultStory.put("avatar", "/api/images/profile-1");
+        defaultStory.put("avatar", baseUrl + "/api/images/profile-1");
         stories.add(defaultStory);
         return stories;
     }
@@ -307,8 +308,7 @@ public List<Map<String, Object>> stories() {
         Map<String, Object> story = new HashMap<>();
         story.put("id", "story-" + username);
         story.put("name", username);
-        story.put("avatar", "/api/images/" + imageId);
-
+        story.put("avatar", baseUrl + "/api/images/" + imageId);
         stories.add(story);
     }
 
@@ -328,12 +328,13 @@ private static String findProfileImageIdIgnoreCase(String username) {
     }
 
     @GetMapping("/explore")
-    public List<Map<String, Object>> explore() {
+    public List<Map<String, Object>> explore(HttpServletRequest request) {
+        String baseUrl = request.getRequestURL().toString().replace(request.getRequestURI(), request.getContextPath());
         List<Map<String, Object>> cards = new ArrayList<>();
 
         Map<String, Object> c1 = new HashMap<>();
         c1.put("title", "Waves");
-        c1.put("image", "/api/images/explore-1");
+        c1.put("image", baseUrl + "/api/images/explore-1");
         c1.put("accent", "#06b6d4");
         cards.add(c1);
 
@@ -347,7 +348,8 @@ private static String findProfileImageIdIgnoreCase(String username) {
     }
 
     @GetMapping("/profile/{username}/photos")
-    public List<String> profilePhotos(@PathVariable String username) {
+    public List<String> profilePhotos(@PathVariable String username, HttpServletRequest request) {
+        String baseUrl = request.getRequestURL().toString().replace(request.getRequestURI(), request.getContextPath());
         List<String> photos = new ArrayList<>();
 
         // First, include images from the FEED authored by the username
@@ -363,25 +365,26 @@ private static String findProfileImageIdIgnoreCase(String username) {
         List<String> ids = USER_IMAGES.get(username);
         if (ids != null) {
             for (String id : ids) {
-                String url = "/api/images/" + id;
+                String url = baseUrl + "/api/images/" + id;
                 if (!photos.contains(url)) photos.add(url);
             }
         }
 
         // If still empty, return static examples
         if (photos.isEmpty()) {
-            photos.add("/api/images/profile-1");
-            photos.add("/api/images/post-1");
-            photos.add("/api/images/hero-1");
+            photos.add(baseUrl + "/api/images/profile-1");
+            photos.add(baseUrl + "/api/images/post-1");
+            photos.add(baseUrl + "/api/images/hero-1");
         }
 
         return photos;
     }
 
     @GetMapping("/profile/{username}/avatar")
-    public Map<String, String> getProfileAvatar(@PathVariable String username) {
+    public Map<String, String> getProfileAvatar(@PathVariable String username, HttpServletRequest request) {
+        String baseUrl = request.getRequestURL().toString().replace(request.getRequestURI(), request.getContextPath());
         String imageId = PROFILE_PICTURES.get(username);
-        String avatarUrl = imageId != null ? "/api/images/" + imageId : "/api/images/profile-1";
+        String avatarUrl = imageId != null ? baseUrl + "/api/images/" + imageId : baseUrl + "/api/images/profile-1";
         return Map.of("avatar", avatarUrl);
     }
 
@@ -461,9 +464,7 @@ private static String findProfileImageIdIgnoreCase(String username) {
         // persist after updating USER_IMAGES so owner is recorded in metadata
         persistUpload(imageId, record, file.getOriginalFilename() != null ? file.getOriginalFilename() : "upload");
 
-        // Use a relative image path in the feed to avoid duplicate entries
-        // where the feed stores absolute URLs but profile builds relative URLs.
-        String feedImagePath = "/api/images/" + imageId;
+        String feedImagePath = baseUrl + "/api/images/" + imageId;
         Map<String, Object> uploadItem = createFeedItem(imageId, titleValue, feedImagePath, owner, 0);
         uploadItem.put("location", locationValue);
         uploadItem.put("uploadedAt", uploadedAt);
