@@ -110,7 +110,7 @@ public class ContentController {
         item.put("id", id);
         item.put("title", title);
         item.put("image", image);
-        item.put("url", "/api/images/" + id);
+        item.put("url", image != null ? image : "/api/images/" + id);
         item.put("author", author);
         // Resolve display name from user repository when available
         String authorName = author;
@@ -126,6 +126,41 @@ public class ContentController {
         item.put("authorName", authorName);
         item.put("likes", likes);
         return item;
+    }
+
+    private static String toAbsoluteUrl(HttpServletRequest request, String url) {
+        if (url == null) {
+            return null;
+        }
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return url;
+        }
+        String baseUrl = request.getRequestURL().toString().replace(request.getRequestURI(), request.getContextPath());
+        if (url.startsWith("/")) {
+            return baseUrl + url;
+        }
+        return baseUrl + "/" + url;
+    }
+
+    private static Map<String, Object> withAbsoluteFeedUrls(HttpServletRequest request, Map<String, Object> item) {
+        Map<String, Object> copy = new HashMap<>(item);
+        Object image = item.get("image");
+        if (image instanceof String) {
+            copy.put("image", toAbsoluteUrl(request, (String) image));
+        }
+        Object url = item.get("url");
+        if (url instanceof String) {
+            copy.put("url", toAbsoluteUrl(request, (String) url));
+        }
+        return copy;
+    }
+
+    private static List<String> absoluteUrls(HttpServletRequest request, List<String> urls) {
+        List<String> absolute = new ArrayList<>();
+        for (String url : urls) {
+            absolute.add(toAbsoluteUrl(request, url));
+        }
+        return absolute;
     }
 
     private static void initUploadStore() throws IOException {
@@ -271,18 +306,21 @@ public class ContentController {
     @GetMapping("/feed")
     public List<Map<String, Object>> feed(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "10") int size,
+            HttpServletRequest request) {
         int from = Math.max(0, page * size);
         int to = Math.min(FEED.size(), from + size);
-        return FEED.subList(from, to);
+        return FEED.subList(from, to).stream()
+                .map(item -> withAbsoluteFeedUrls(request, item))
+                .toList();
     }
 
     @GetMapping("/feed/{id}")
-    public ResponseEntity<Map<String, Object>> getFeedItem(@PathVariable String id) {
+    public ResponseEntity<Map<String, Object>> getFeedItem(@PathVariable String id, HttpServletRequest request) {
         return FEED.stream()
                 .filter(item -> id.equals(item.get("id")))
                 .findFirst()
-                .map(ResponseEntity::ok)
+                .map(item -> ResponseEntity.ok(withAbsoluteFeedUrls(request, item)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
