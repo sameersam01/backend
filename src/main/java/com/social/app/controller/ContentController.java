@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,12 +33,16 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import com.social.app.repository.UserRepository;
 import com.social.app.model.User;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 @RestController
 @RequestMapping("/api")
 public class ContentController {
+
+    private static final Logger log = LoggerFactory.getLogger(ContentController.class);
 
     private static final String DEFAULT_IMAGE_URL = "https://images.unsplash.com/photo-1508615121316-fe792af62a63?q=80&w=1170&auto=format&fit=crop";
 
@@ -95,22 +100,26 @@ public class ContentController {
             METADATA_FILE = UPLOAD_DIR.resolve("metadata.txt");
             PROFILE_METADATA_FILE = UPLOAD_DIR.resolve("profile-mapping.txt");
             USER_IMAGES_FILE = UPLOAD_DIR.resolve("user-images.txt");
-            System.out.println("Using uploads directory: " + UPLOAD_DIR.toAbsolutePath());
+            log.info("Using uploads directory: {}", UPLOAD_DIR.toAbsolutePath());
             initUploadStore();
             initProfileStore();
             initUserImagesStore();
         } catch (IOException e) {
+            log.error("Unable to initialize upload storage", e);
             throw new IllegalStateException("Unable to initialize upload storage", e);
         }
     }
 
     private static Path findUploadDir() throws IOException {
         Path cwd = Paths.get(System.getProperty("user.dir"));
+        log.debug("Searching for uploads directory from cwd={}", cwd.toAbsolutePath());
         // Check current and up to 3 parent levels for an 'uploads' folder
         Path cursor = cwd;
         for (int i = 0; i < 4; i++) {
             Path candidate = cursor.resolve("uploads");
+            log.debug("Checking upload candidate: {}", candidate.toAbsolutePath());
             if (Files.exists(candidate) && Files.isDirectory(candidate)) {
+                log.info("Found existing uploads directory: {}", candidate.toAbsolutePath());
                 return candidate.toAbsolutePath().normalize();
             }
             cursor = cursor.getParent();
@@ -120,6 +129,7 @@ public class ContentController {
         Path created = cwd.resolve("uploads");
         if (!Files.exists(created)) {
             Files.createDirectories(created);
+            log.info("Created uploads directory: {}", created.toAbsolutePath());
         }
         return created.toAbsolutePath().normalize();
     }
@@ -292,6 +302,7 @@ public class ContentController {
         }
 
         Path imagePath = getUploadPath(imageId);
+        log.info("Persisting upload {} to {}", imageId, imagePath.toAbsolutePath());
         Files.write(imagePath, record.getBytes());
 
         // store owner if known (stored in USER_IMAGES map), append as 7th field
@@ -497,12 +508,15 @@ private static String findProfileImageIdIgnoreCase(String username) {
                                                            @RequestParam(required = false) String username,
                                                            HttpServletRequest request) throws IOException {
         if (file == null || file.isEmpty()) {
+            log.warn("Upload attempted with empty file");
             return ResponseEntity.badRequest().body(Map.of("message", "No file uploaded"));
         }
 
         String imageId = "upload-" + UUID.randomUUID();
         String baseUrl = request.getRequestURL().toString().replace(request.getRequestURI(), request.getContextPath());
         String uploadedUrl = baseUrl + "/api/images/" + imageId;
+        log.info("Received upload file={}, title={}, location={}, username={}; assigned id={}",
+                file.getOriginalFilename(), title, location, username, imageId);
 
         String titleValue = title != null && !title.isBlank() ? title : file.getOriginalFilename();
         String locationValue = location != null && !location.isBlank() ? location : "Unknown location";
@@ -543,14 +557,96 @@ private static String findProfileImageIdIgnoreCase(String username) {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    @PostMapping(path = "/upload-base64", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Map<String, String>> uploadBase64Image(@RequestBody Base64UploadRequest requestBody,
+                                                                 HttpServletRequest request) throws IOException {
+        if (requestBody == null || requestBody.imageData == null || requestBody.imageData.isBlank()) {
+            log.warn("Base64 upload attempted with empty payload");
+            return ResponseEntity.badRequest().body(Map.of("message", "No base64 image data provided"));
+        }
+
+        byte[] imageBytes = decodeBase64Image(requestBody.imageData);
+        if (imageBytes == null || imageBytes.length == 0) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Invalid base64 image data"));
+        }
+
+        String contentType = requestBody.contentType != null && !requestBody.contentType.isBlank()
+                ? requestBody.contentType
+                : MediaType.IMAGE_JPEG_VALUE;
+        String imageId = "upload-" + UUID.randomUUID();
+        String baseUrl = request.getRequestURL().toString().replace(request.getRequestURI(), request.getContextPath());
+        String uploadedUrl = baseUrl + "/api/images/" + imageId;
+
+        String titleValue = requestBody.title != null && !requestBody.title.isBlank() ? requestBody.title : "upload";
+        String locationValue = requestBody.location != null && !requestBody.location.isBlank() ? requestBody.location : "Unknown location";
+        String uploadedAt = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
+
+        ImageRecord record = new ImageRecord(
+                imageBytes,
+                contentType,
+                titleValue,
+                locationValue,
+                uploadedAt
+        );
+
+        IMAGE_RECORDS.put(imageId, record);
+        IMAGE_URLS.put(imageId, uploadedUrl);
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String principal = (auth != null && auth.getName() != null && !auth.getName().isBlank()) ? auth.getName() : null;
+        String owner = principal != null ? principal : (requestBody.username != null && !requestBody.username.isBlank() ? requestBody.username : "you");
+        USER_IMAGES.computeIfAbsent(owner, k -> new ArrayList<>()).add(imageId);
+        saveUserImagesMapping();
+        persistUpload(imageId, record, titleValue);
+
+        String feedImagePath = baseUrl + "/api/images/" + imageId;
+        Map<String, Object> uploadItem = createFeedItem(imageId, titleValue, feedImagePath, owner, 0);
+        uploadItem.put("location", locationValue);
+        uploadItem.put("uploadedAt", uploadedAt);
+        FEED.add(0, uploadItem);
+
+        Map<String, String> response = new HashMap<>();
+        response.put("id", imageId);
+        response.put("url", uploadedUrl);
+        response.put("preview", uploadedUrl);
+        response.put("title", titleValue);
+        response.put("location", locationValue);
+        response.put("uploadedAt", uploadedAt);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    private static byte[] decodeBase64Image(String imageData) {
+        String base64 = imageData;
+        if (base64.contains(",")) {
+            base64 = base64.substring(base64.indexOf(',') + 1);
+        }
+        try {
+            byte[] decoded = Base64.getDecoder().decode(base64);
+            log.debug("Decoded base64 image data, size={}", decoded.length);
+            return decoded;
+        } catch (IllegalArgumentException e) {
+            log.warn("Failed to decode base64 image data: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static class Base64UploadRequest {
+        public String imageData;
+        public String contentType;
+        public String title;
+        public String location;
+        public String username;
+    }
+
     @GetMapping("/images/{id}")
     public ResponseEntity<byte[]> image(@PathVariable String id) throws IOException {
-        ImageRecord record = IMAGE_RECORDS.get(id);
+        String normalizedId = id.replaceAll("^<|>$", "");
+        ImageRecord record = IMAGE_RECORDS.get(normalizedId);
         byte[] bytes = record != null ? record.getBytes() : null;
         String contentType = record != null ? record.getContentType() : MediaType.APPLICATION_OCTET_STREAM_VALUE;
 
         if (bytes == null) {
-            Path filePath = getUploadPath(id);
+            Path filePath = getUploadPath(normalizedId);
             if (Files.exists(filePath)) {
                 bytes = Files.readAllBytes(filePath);
             }
