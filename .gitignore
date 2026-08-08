@@ -1,0 +1,17 @@
+# Maven build output
+/target/
+
+# Temporary files
+*.log
+*.tmp
+*.swp
+.DS_Store
+.idea/
+.vscode/
+
+# Local database and runtime state
+/data/
+/uploads/
+
+# OS files
+Thumbs.db
